@@ -1,0 +1,62 @@
+# PDF Toolbox Project Roadmap
+
+## Active Milestone: v1.0 Core Essentials & Foundation
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Phase 1: Project Setup, Design System & PWA Architecture               │
+│ - Vite + React + TypeScript + Vanilla CSS Design System                │
+│ - Offline PWA Configuration & Service Worker Cache                      │
+│ - Dashboard Shell, Tool Navigation, Search & Theme Toggle               │
+│ - Common File Dropzone, Thumbnails & Toast Feedback System              │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Phase 2: Core PDF Processing Engine & Document Services                 │
+│ - PDF.js & pdf-lib Integration with Web Worker Rendering                │
+│ - Merge Service & Multi-file Handler                                    │
+│ - Split / Burst Service with Range Parser & Zip Bundler                 │
+│ - Visual Page Manipulation Service (Rotate, Delete, Duplicate, Order)   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Phase 3: Core Essential Tools Implementation                            │
+│ - Tool 1: Merge PDFs Workspace                                          │
+│ - Tool 2: Split & Burst PDF Workspace                                   │
+│ - Tool 3: Visual Page Organizer (Interactive Grid, Drag & Drop, Rotate) │
+│ - Tool 4: PDF Compressor (Multi-level Quality Presets & Size Saver)     │
+│ - Tool 5: Images to PDF Converter (Layout, Margins, Orientations)       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Phase 4: Testing, Offline Verification & Polish                         │
+│ - End-to-end Verification of All 5 Essential Tools                      │
+│ - 100% Offline PWA Validation & Memory Cleanup                          │
+│ - Documentation & Open-Source Release Packaging                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phases Overview
+
+### Phase 1: Project Setup, Design System & PWA Shell
+**Goal**: Build modern responsive UI shell, theme switcher, offline PWA infrastructure, and core reusable UI components.
+- Status: Planned
+- Key Outputs: Working Vite app, responsive layout, dark/light theme, dropzone, toast system, offline PWA manifest.
+
+### Phase 2: PDF Processing Engines & Services
+**Goal**: Implement client-side PDF rendering, thumbnail generation, manipulation, splitting, merging, and compression services.
+- Status: Planned
+- Key Outputs: `pdfService.ts`, `renderService.ts`, `compressService.ts`, `conversionService.ts`.
+
+### Phase 3: Essential Tools Execution
+**Goal**: Complete end-to-end interactive workspaces for Merge, Split, Page Organizer, Compress, and Images to PDF.
+- Status: Planned
+- Key Outputs: 5 fully functional interactive tool workspaces with instant local download.
+
+### Phase 4: Polish & Verification
+**Goal**: Verify all client-side PDF operations, test offline PWA installation, optimize memory handling for large PDFs.
+- Status: Planned
+- Key Outputs: Verified v1.0 release ready for local use and self-hosting.
+
+---
+
+## Future Expansion Milestones (Post v1.0)
+- **v1.1**: Conversions & Extractions (PDF to Images ZIP, PDF to Text, Markdown to PDF, Remove Blank Pages).
+- **v1.2**: Annotate & Sign (Signature pad, Watermarks, Page Numbers, Metadata Editor).
+- **v1.3**: Security & Privacy (Password Protect/Unlock, Permanent Redaction).
