@@ -2,12 +2,30 @@ import PdfWorker from './pdfWorker?worker';
 import { WorkerMessage, WorkerResponse } from './pdfWorker';
 import { ConversionOptions } from './conversionService';
 
+// NOTE: pdf.js's WorkerMessageHandler emits an unsolicited `{ action: 'ready' }`
+// handshake message as soon as the worker module evaluates. It has no `type`
+// field matching WorkerResponse, so it's silently ignored by every listener
+// below (all of them switch on `response.type`). This is expected — do not
+// add a default/catch-all branch that treats an unmatched type as an error.
+
 // Singleton instance of the worker
 let worker: Worker | null = null;
+
+// Rejections for every currently in-flight request against the current worker
+// instance. If the worker itself fails to load (e.g. a 404'd chunk after a
+// bad deploy), `onerror` fires instead of any 'message' handler, so without
+// this the UI would hang forever with no toast and no console error.
+const pendingRejections = new Set<(error: Error) => void>();
 
 const getWorker = (): Worker => {
   if (!worker) {
     worker = new PdfWorker();
+    worker.addEventListener('error', (event) => {
+      const error = new Error(`PDF worker failed to load: ${event.message || 'unknown error'}`);
+      for (const reject of pendingRejections) reject(error);
+      pendingRejections.clear();
+      recycleWorker();
+    });
   }
   return worker;
 };
@@ -29,15 +47,20 @@ export const recycleWorker = (): void => {
 export const renderThumbnail = (file: File, id: string): Promise<{ url: string; pageCount: number }> => {
   return new Promise((resolve, reject) => {
     const w = getWorker();
+    const settle = (fn: () => void) => {
+      pendingRejections.delete(reject);
+      fn();
+    };
+    pendingRejections.add(reject);
 
     const handleMessage = (e: MessageEvent<WorkerResponse>) => {
       const response = e.data;
       if (response.type === 'THUMBNAIL_SUCCESS' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        resolve({ url: response.payload.url, pageCount: response.payload.pageCount });
+        settle(() => resolve({ url: response.payload.url, pageCount: response.payload.pageCount }));
       } else if (response.type === 'THUMBNAIL_ERROR' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        reject(new Error(response.payload.error));
+        settle(() => reject(new Error(response.payload.error)));
       }
     };
 
@@ -53,15 +76,20 @@ export const renderThumbnail = (file: File, id: string): Promise<{ url: string; 
 export const renderAllThumbnails = (file: File, id: string): Promise<{ urls: string[]; pageCount: number }> => {
   return new Promise((resolve, reject) => {
     const w = getWorker();
+    const settle = (fn: () => void) => {
+      pendingRejections.delete(reject);
+      fn();
+    };
+    pendingRejections.add(reject);
 
     const handleMessage = (e: MessageEvent<WorkerResponse>) => {
       const response = e.data;
       if (response.type === 'ALL_THUMBNAILS_SUCCESS' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        resolve({ urls: response.payload.urls, pageCount: response.payload.pageCount });
+        settle(() => resolve({ urls: response.payload.urls, pageCount: response.payload.pageCount }));
       } else if (response.type === 'THUMBNAIL_ERROR' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        reject(new Error(response.payload.error));
+        settle(() => reject(new Error(response.payload.error)));
       }
     };
 
@@ -84,15 +112,20 @@ const sendManipulationCommand = (
   return new Promise((resolve, reject) => {
     const w = getWorker();
     const id = payload.id;
+    const settle = (fn: () => void) => {
+      pendingRejections.delete(reject);
+      fn();
+    };
+    pendingRejections.add(reject);
 
     const handleMessage = (e: MessageEvent<WorkerResponse>) => {
       const response = e.data;
       if (response.type === 'MANIPULATION_SUCCESS' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        resolve({ data: response.payload.data, resultType: response.payload.resultType });
+        settle(() => resolve({ data: response.payload.data, resultType: response.payload.resultType }));
       } else if (response.type === 'MANIPULATION_ERROR' && response.payload.id === id) {
         w.removeEventListener('message', handleMessage);
-        reject(new Error(response.payload.error));
+        settle(() => reject(new Error(response.payload.error)));
       }
     };
 

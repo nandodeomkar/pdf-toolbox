@@ -1,11 +1,19 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configure the pdf.js worker. Using `new URL(..., import.meta.url)` lets Vite
-// resolve and bundle the worker file correctly at build time.
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).toString();
+// Bundle the pdf.js engine directly into this worker chunk rather than fetching
+// it at runtime. `pdf.worker.mjs` assigns `globalThis.pdfjsWorker` at module
+// scope, and both `PDFWorker._initialize()` and `_setupFakeWorkerGlobal`
+// short-circuit on `globalThis.pdfjsWorker?.WorkerMessageHandler` *before* they
+// read `GlobalWorkerOptions.workerSrc`. So the throwing `workerSrc` getter is
+// never reached, no dynamic `import()` is issued, and no separate
+// `dist/assets/pdf.worker-*.mjs` asset is emitted — which keeps the engine
+// inside the precached chunk and makes offline rendering work.
+//
+// Do NOT reintroduce a `GlobalWorkerOptions.workerSrc` assignment here: the
+// runtime URL it produced was the source of the "No GlobalWorkerOptions.
+// workerSrc specified" render failures, and it left the engine un-precached.
+import 'pdfjs-dist/build/pdf.worker.mjs';
+
 import { mergePdfs, burstPdf, splitPdf, manipulatePages, PageOperation } from './pdfManipulationService';
 import { compressPdf } from './compressService';
 import { convertImagesToPdf, ConversionOptions } from './conversionService';
