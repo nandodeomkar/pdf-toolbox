@@ -1,4 +1,11 @@
 import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure the pdf.js worker. Using `new URL(..., import.meta.url)` lets Vite
+// resolve and bundle the worker file correctly at build time.
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
 import { mergePdfs, burstPdf, splitPdf, manipulatePages, PageOperation } from './pdfManipulationService';
 import { compressPdf } from './compressService';
 import { convertImagesToPdf, ConversionOptions } from './conversionService';
