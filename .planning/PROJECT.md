@@ -20,3 +20,14 @@ A 100% client-side, offline, open-source PDF manipulation suite designed as a pr
 ## Target Audience
 - Privacy-conscious individuals and professionals handling sensitive financial, medical, legal, or personal documents.
 - Users who need fast, offline, free PDF tools without subscription paywalls, watermarks, or upload delays.
+
+## Current State
+**v1.0 Core Essentials & Foundation** has been successfully shipped. The application currently functions as a robust offline PWA featuring a dark/light theme, local memory-managed Web Workers, and 5 foundational tools:
+1. Merge PDFs
+2. Split & Burst PDF
+3. Visual Page Organizer (with Drag-and-Drop)
+4. PDF Compressor
+5. Images to PDF Converter
+
+## Next Milestone Goals
+**v1.1 Conversions & Extractions**: Focus on expanding the toolbox with new capabilities such as PDF to Image extraction, PDF to Text, Markdown to PDF, and removing blank pages automatically.

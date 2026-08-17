@@ -4,7 +4,10 @@
 - **Active Milestone**: v1.0 Core Essentials & Foundation
 - **Completed Phases**:
   - Phase 1: Project Setup, Design System & PWA Architecture (Completed 2026-08-16)
-- **Current Phase**: Ready for Phase 2 (Core PDF Processing Engines & Services) or Phase 3 (Core Essential Tools)
+  - Phase 2: Core PDF Processing Engine & Document Services (Completed 2026-08-17)
+  - Phase 3: Core Essential Tools Implementation (Completed 2026-08-17)
+  - Phase 4: Testing, Offline Verification & Polish (Completed 2026-08-17)
+- **Current Phase**: Ready for Phase 5 (Organizer Gap Closure)
 
 ## Decisions Log
 - **Architecture**: Vite 6 + React 19 + TypeScript + Vanilla CSS (Zinc & Emerald Theme).
@@ -16,6 +19,13 @@
   - `FileDropzone` with drag-and-drop, clipboard paste support (`Ctrl+V`), and size limits.
   - `ToastContainer` + `ToastContext` with animated notification feedback.
   - `ToolHeader` and `Footer` with local engine status indicator.
+- **Core Services Delivered**:
+  - Web Worker integration (`pdfWorker.ts`) for off-main-thread processing.
+  - `pdfManipulationService.ts` for merge, split, burst, and page manipulations.
+  - Zustand `pdfStore.ts` for managing application state.
+  - `compressService.ts` and `conversionService.ts` for additional functionality.
+- **Workspaces Delivered**:
+  - Merge, Split/Burst, Organizer, Compressor, and Converter workspaces connected to `ToolWorkspace.tsx` router.
 
 ## Next Action
-Run `/gsd-plan-phase 2` (or discuss Phase 2) to build the core PDF processing engines and thumbnail renderers.
+Run `/gsd-complete-milestone` to archive the completed v1.0 milestone and prepare the project for the v1.1 expansions (Conversions & Extractions).

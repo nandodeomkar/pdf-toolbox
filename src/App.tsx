@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ToastProvider, useToast } from './context/ToastContext';
+import { ToastProvider } from './context/ToastContext';
 import { ToastContainer } from './components/common/ToastContainer';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { PrivacyModal } from './components/layout/PrivacyModal';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { ToolHeader } from './components/layout/ToolHeader';
+import { ToolWorkspace } from './components/workspace/ToolWorkspace';
 import { TOOLS } from './config/tools';
 import { ToolCategory, ThemeMode } from './types';
 
@@ -19,7 +20,6 @@ const MainApp: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<ToolCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
-  const { addToast } = useToast();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -67,32 +67,8 @@ const MainApp: React.FC = () => {
           <div className="tool-workspace">
             <ToolHeader tool={activeTool} onBack={handleBackToDashboard} />
             
-            {/* Tool placeholder for Phase 1 verification */}
-            <div
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-xl)',
-                padding: '40px 24px',
-                textAlign: 'center'
-              }}
-            >
-              <h3 style={{ marginBottom: 8 }}>{activeTool.title} Workspace</h3>
-              <p style={{ color: 'var(--text-secondary)', maxWidth: 540, margin: '0 auto 20px' }}>
-                {activeTool.fullDescription}
-              </p>
-              <div style={{ display: 'inline-flex', gap: 12 }}>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => addToast('info', 'Phase 1 Shell Active', `Testing notifications for ${activeTool.title}`)}
-                >
-                  Test Notification
-                </button>
-                <button className="btn btn-primary" onClick={handleBackToDashboard}>
-                  Back to Tools
-                </button>
-              </div>
-            </div>
+            {/* Tool Workspace - integrated with Web Worker tracer slice */}
+            <ToolWorkspace tool={activeTool} />
           </div>
         )}
       </main>
