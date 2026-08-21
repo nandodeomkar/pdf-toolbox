@@ -18,6 +18,84 @@ import { mergePdfs, burstPdf, splitPdf, manipulatePages, PageOperation } from '.
 import { compressPdf } from './compressService';
 import { convertImagesToPdf, ConversionOptions } from './conversionService';
 
+// pdf.js's getDocument() picks its CanvasFactory/FontLoader/FilterFactory
+// defaults based on `isNodeJS` alone: anything that isn't Node is assumed to
+// have a `document` (i.e. to be the browser main thread). That's false for a
+// Web Worker. Three DOM dependencies that only surface for PDFs exercising
+// the relevant features would otherwise throw "Cannot read properties of
+// undefined (reading 'createElement')" (or '.fonts') deep inside rendering:
+//
+//  - DOMCanvasFactory creates *internal scratch* canvases (for tiling
+//    patterns, transparency groups, soft-mask groups, Type3 glyph caches) via
+//    `document.createElement('canvas')`. This is separate from the top-level
+//    canvasContext we pass to page.render() below, and simple PDFs (plain
+//    text/images) never need a scratch canvas — which is why those render
+//    fine while a document using any of the above doesn't. We supply an
+//    OffscreenCanvas-backed factory matching pdf.js's expected
+//    {create, reset, destroy} shape instead.
+//  - FontLoader.addNativeFontFace/insertRule touches `document.fonts` /
+//    `document.createElement('style')` for embedded fonts loaded via the
+//    native Font Loading API. `disableFontFace: true` makes pdf.js render
+//    glyphs via canvas path-fill instead — the standard headless/worker mode.
+//  - DOMFilterFactory (soft-mask / blend-mode / high-contrast-mode canvas
+//    compositing) injects an off-screen <svg><defs> into `document.body`.
+//
+// None of DOMCanvasFactory/DOMFilterFactory/NodeCanvasFactory/NodeFilterFactory
+// are exported from pdfjs-dist's public API, so we implement the two factories
+// ourselves rather than subclassing pdf.js's internal (unexported) base classes.
+// Where pdf.js fetches its standard-14 font data (Helvetica/Times/Courier/...).
+//
+// `disableFontFace: true` above is mandatory in a worker — the native Font
+// Loading API needs `document.fonts`, which doesn't exist here — and it makes
+// pdf.js render glyphs by path-filling instead. Path-filling needs this font
+// data for any PDF that doesn't embed its fonts, i.e. most simple and
+// generated PDFs. Omit it and pdf.js drops every glyph, rendering pages with
+// no text at all while warning only at `info` level:
+//   Warning: UnknownErrorException: Ensure that the `standardFontDataUrl` API
+//   parameter is provided.
+//
+// These are same-origin assets served by the pdfjsStandardFonts plugin in
+// vite.config.ts and precached by the service worker, so this stays a
+// zero-upload, fully offline-capable path. `self.location.origin` makes the
+// URL absolute: pdf.js resolves it internally rather than against this chunk's
+// own location under /assets/.
+const STANDARD_FONT_DATA_URL = new URL(
+  `${import.meta.env.BASE_URL}standard_fonts/`,
+  self.location.origin
+).href;
+
+class OffscreenCanvasFactory {
+  create(width: number, height: number) {
+    if (width <= 0 || height <= 0) {
+      throw new Error('Invalid canvas size');
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    return { canvas, context: canvas.getContext('2d') };
+  }
+  reset(canvasAndContext: { canvas: OffscreenCanvas | null }, width: number, height: number): void {
+    if (!canvasAndContext.canvas) throw new Error('Canvas is not specified');
+    if (width <= 0 || height <= 0) throw new Error('Invalid canvas size');
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+  destroy(canvasAndContext: { canvas: OffscreenCanvas | null; context: unknown }): void {
+    if (!canvasAndContext.canvas) throw new Error('Canvas is not specified');
+    canvasAndContext.canvas.width = 0;
+    canvasAndContext.canvas.height = 0;
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
+class NoDomFilterFactory {
+  addFilter(): string { return 'none'; }
+  addHCMFilter(): string { return 'none'; }
+  addAlphaFilter(): string { return 'none'; }
+  addLuminosityFilter(): string { return 'none'; }
+  addHighlightHCMFilter(): string { return 'none'; }
+  destroy(): void {}
+}
+
 export type WorkerMessage =
   | { type: 'RENDER_THUMBNAIL'; payload: { file: File; id: string } }
   | { type: 'RENDER_ALL_THUMBNAILS'; payload: { file: File; id: string } }
@@ -42,7 +120,24 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     try {
       const { file, id } = payload;
       const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const loadingTask = pdfjsLib.getDocument({
+        data: arrayBuffer,
+        disableFontFace: true,
+        standardFontDataUrl: STANDARD_FONT_DATA_URL,
+        // Must be explicit. pdf.js only auto-enables worker-side fetching when
+        // `isValidFetchUrl(cMapUrl, document.baseURI)` passes -- a main-thread
+        // assumption twice over: there is no `document` here, and we pass no
+        // cMapUrl, so the check short-circuits falsy before it can throw. Left
+        // to default, pdf.js routes font loading through the main-thread
+        // StandardFontDataFactory instead, which never delivers the bytes and
+        // reports nothing: `font.data` stays null, the worker skips
+        // buildFontPaths entirely, and every glyph is dropped with only an
+        // `info`-level getPathGenerator warning. Setting this true makes the
+        // worker fetch the data itself with a plain `fetch`.
+        useWorkerFetch: true,
+        CanvasFactory: OffscreenCanvasFactory,
+        FilterFactory: NoDomFilterFactory
+      });
       const pdf = await loadingTask.promise;
       const pageCount = pdf.numPages;
 
