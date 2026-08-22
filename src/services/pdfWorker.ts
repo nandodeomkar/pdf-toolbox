@@ -14,7 +14,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 // workerSrc specified" render failures, and it left the engine un-precached.
 import 'pdfjs-dist/build/pdf.worker.mjs';
 
-import { mergePdfs, burstPdf, splitPdf, manipulatePages, PageOperation } from './pdfManipulationService';
+import { mergePdfs, burstPdf, splitPdf, applyPageLayout, PageSlot } from './pdfManipulationService';
 import { compressPdf } from './compressService';
 import { convertImagesToPdf, ConversionOptions } from './conversionService';
 
@@ -102,7 +102,7 @@ export type WorkerMessage =
   | { type: 'MERGE_PDFS'; payload: { files: File[]; id: string } }
   | { type: 'BURST_PDF'; payload: { file: File; id: string } }
   | { type: 'SPLIT_PDF'; payload: { file: File; ranges: string; id: string } }
-  | { type: 'MANIPULATE_PAGES'; payload: { file: File; operations: PageOperation[]; id: string } }
+  | { type: 'APPLY_PAGE_LAYOUT'; payload: { file: File; slots: PageSlot[]; id: string } }
   | { type: 'COMPRESS_PDF'; payload: { file: File; quality: 'high' | 'medium' | 'low'; id: string } }
   | { type: 'CONVERT_IMAGES'; payload: { files: File[]; options: ConversionOptions; id: string } };
 
@@ -202,8 +202,8 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
         const res = await splitPdf(payload.file, payload.ranges);
         data = res.data;
         resultType = res.type;
-      } else if (type === 'MANIPULATE_PAGES') {
-        data = await manipulatePages(payload.file, payload.operations);
+      } else if (type === 'APPLY_PAGE_LAYOUT') {
+        data = await applyPageLayout(payload.file, payload.slots);
       } else if (type === 'COMPRESS_PDF') {
         data = await compressPdf(payload.file, payload.quality);
       } else if (type === 'CONVERT_IMAGES') {

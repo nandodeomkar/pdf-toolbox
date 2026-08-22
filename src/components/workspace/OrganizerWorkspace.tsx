@@ -1,125 +1,129 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePdfStore } from '../../store/pdfStore';
-import { renderAllThumbnails, manipulatePagesWorker } from '../../services/workerClient';
-import { PageOperation } from '../../services/pdfManipulationService';
+import { renderAllThumbnails, applyPageLayoutWorker } from '../../services/workerClient';
+import { PageSlot } from '../../services/pdfManipulationService';
 import { useToast } from '../../context/ToastContext';
+
+// 1x1 transparent GIF, used as the thumbnail for an inserted blank page.
+const BLANK_THUMBNAIL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 export const OrganizerWorkspace: React.FC = () => {
   const { files, clearFiles } = usePdfStore();
   const { addToast } = useToast();
-  
-  const [urls, setUrls] = useState<string[]>([]);
-  const [operations, setOperations] = useState<PageOperation[]>([]);
+
+  // `thumbs` is indexed by ORIGINAL page index and never mutated. `slots` is the
+  // document the user is building. Keeping them separate is what makes the grid
+  // and the saved file agree: a slot names its source page explicitly, so
+  // reordering or deleting can never leave an index pointing at the wrong page.
+  const [thumbs, setThumbs] = useState<string[]>([]);
+  const [slots, setSlots] = useState<PageSlot[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingThumbs, setIsLoadingThumbs] = useState(false);
-  
-  const dragItem = React.useRef<number | null>(null);
-  const dragOverItem = React.useRef<number | null>(null);
 
-  const handleSort = () => {
-    if (dragItem.current === null || dragOverItem.current === null) return;
-    
-    // Create new array of current indices
-    const currentIndices = urls.map((_, i) => i);
-    
-    // Swap visually
-    const newUrls = [...urls];
-    const draggedUrl = newUrls.splice(dragItem.current, 1)[0];
-    newUrls.splice(dragOverItem.current, 0, draggedUrl);
-    
-    // Swap indices to build reorder operation
-    const draggedIdx = currentIndices.splice(dragItem.current, 1)[0];
-    currentIndices.splice(dragOverItem.current, 0, draggedIdx);
+  // Which file we have already tried to extract. Set BEFORE the async call so a
+  // rejection cannot re-trigger the effect -- previously the guard was
+  // `urls.length === 0`, which stayed true on failure and re-issued the render
+  // forever, pinning the worker at 100% CPU and spamming toasts.
+  const attemptedFileId = useRef<string | null>(null);
 
-    setUrls(newUrls);
-    
-    // We queue a reorder operation. To be perfectly accurate, this is complex with sequential ops.
-    // For this scope, we just append a reorder with the new sequence of the *current* state.
-    setOperations(prev => [...prev, { type: 'reorder', newOrder: currentIndices }]);
-    
-    dragItem.current = null;
-    dragOverItem.current = null;
-  };
+  const dragItem = useRef<number | null>(null);
+  const dragOverItem = useRef<number | null>(null);
 
   useEffect(() => {
-    const fileItem = files.find(f => f.status === 'ready');
-    if (fileItem && urls.length === 0 && !isLoadingThumbs) {
-      setIsLoadingThumbs(true);
-      renderAllThumbnails(fileItem.file, fileItem.id)
-        .then(res => {
-          setUrls(res.urls);
-        })
-        .catch(err => {
-          addToast('error', 'Failed to load thumbnails', err.message);
-        })
-        .finally(() => {
-          setIsLoadingThumbs(false);
-        });
-    }
-  }, [files, urls.length, isLoadingThumbs, addToast]);
+    const fileItem = files.find((f) => f.status === 'ready');
+    if (!fileItem || attemptedFileId.current === fileItem.id) return;
 
-  const handleRotate = (pageIndex: number) => {
-    setOperations(prev => [...prev, { type: 'rotate', pageIndex, degrees: 90 }]);
-    addToast('success', 'Page Rotated', `Page ${pageIndex + 1} rotated 90 degrees.`);
+    attemptedFileId.current = fileItem.id;
+    setIsLoadingThumbs(true);
+    renderAllThumbnails(fileItem.file, fileItem.id)
+      .then((res) => {
+        setThumbs(res.urls);
+        setSlots(res.urls.map((_, i) => ({ kind: 'page', sourceIndex: i, rotation: 0 })));
+      })
+      .catch((err) => {
+        addToast('error', 'Failed to load pages', err.message);
+      })
+      .finally(() => {
+        setIsLoadingThumbs(false);
+      });
+  }, [files, addToast]);
+
+  const updateSlot = (position: number, change: (slot: PageSlot) => PageSlot) => {
+    setSlots((prev) => prev.map((slot, i) => (i === position ? change(slot) : slot)));
+  };
+
+  const handleRotate = (position: number) => {
+    updateSlot(position, (slot) => ({ ...slot, rotation: slot.rotation + 90 }));
   };
 
   const handleRotateAll = () => {
-    // Generate rotate ops for all currently visible pages
-    const ops: PageOperation[] = urls.map((url, i) => url ? { type: 'rotate', pageIndex: i, degrees: 90 } : null).filter(Boolean) as PageOperation[];
-    setOperations(prev => [...prev, ...ops]);
-    addToast('success', 'Rotated All', 'All pages rotated 90 degrees.');
+    setSlots((prev) => prev.map((slot) => ({ ...slot, rotation: slot.rotation + 90 })));
+    addToast('success', 'Rotated All', 'Every page rotated 90 degrees.');
   };
 
-  const handleDelete = (pageIndex: number) => {
-    setOperations(prev => [...prev, { type: 'delete', pageIndex }]);
-    setUrls(prev => prev.map((url, i) => i === pageIndex ? '' : url));
-    addToast('success', 'Page Deleted', `Page ${pageIndex + 1} will be deleted.`);
+  const handleDelete = (position: number) => {
+    setSlots((prev) => prev.filter((_, i) => i !== position));
+    addToast('success', 'Page Removed', `Page ${position + 1} removed from the layout.`);
   };
 
-  const handleDuplicate = (pageIndex: number) => {
-    setOperations(prev => [...prev, { type: 'duplicate', pageIndex }]);
-    const newUrls = [...urls];
-    newUrls.splice(pageIndex + 1, 0, urls[pageIndex]); // visually insert clone next to it
-    setUrls(newUrls);
-    addToast('success', 'Page Duplicated', `Page ${pageIndex + 1} duplicated.`);
+  const handleDuplicate = (position: number) => {
+    setSlots((prev) => [...prev.slice(0, position + 1), { ...prev[position] }, ...prev.slice(position + 1)]);
+    addToast('success', 'Page Duplicated', `Page ${position + 1} duplicated.`);
   };
 
   const handleInsertBlank = () => {
-    // Insert at the end for simplicity
-    const newIndex = urls.length;
-    setOperations(prev => [...prev, { type: 'insertBlank', pageIndex: newIndex }]);
-    // Use a blank data URI for the visual representation
-    const blankImage = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-    setUrls(prev => [...prev, blankImage]);
+    setSlots((prev) => [...prev, { kind: 'blank', rotation: 0 }]);
     addToast('success', 'Blank Page Inserted', 'Added to the end of the document.');
   };
 
+  const handleSort = () => {
+    const from = dragItem.current;
+    const to = dragOverItem.current;
+    dragItem.current = null;
+    dragOverItem.current = null;
+    if (from === null || to === null || from === to) return;
+
+    setSlots((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  // The layout is unchanged when it is still every source page, in order,
+  // unrotated. Derived rather than tracked so it cannot fall out of sync.
+  const isPristine =
+    slots.length === thumbs.length &&
+    slots.every((slot, i) => slot.kind === 'page' && slot.sourceIndex === i && slot.rotation % 360 === 0);
+
   const handleSave = async () => {
-    const readyFiles = files.filter(f => f.status === 'ready');
+    const readyFiles = files.filter((f) => f.status === 'ready');
     if (readyFiles.length !== 1) return;
 
     setIsProcessing(true);
     try {
-      const response = await manipulatePagesWorker(readyFiles[0].file, operations);
-      
+      const response = await applyPageLayoutWorker(readyFiles[0].file, slots);
+
       const blob = new Blob([response.data as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      
+
       const a = document.createElement('a');
       a.href = url;
       a.download = 'organized.pdf';
       a.click();
-      
+
       // Cleanup Object URL to release browser memory
       setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       addToast('success', 'Saved', 'Your organized PDF has been downloaded.');
       clearFiles();
-      setUrls([]);
-      setOperations([]);
-      
+      setThumbs([]);
+      setSlots([]);
+      attemptedFileId.current = null;
+
       // Explicitly recycle the worker after a heavy operation
-      import('../../services/workerClient').then(module => module.recycleWorker());
+      import('../../services/workerClient').then((module) => module.recycleWorker());
     } catch (err: any) {
       addToast('error', 'Failed to save', err.message);
     } finally {
@@ -127,7 +131,7 @@ export const OrganizerWorkspace: React.FC = () => {
     }
   };
 
-  if (files.filter(f => f.status === 'ready').length !== 1) {
+  if (files.filter((f) => f.status === 'ready').length !== 1) {
     return (
       <div style={{ marginTop: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
         Please upload exactly 1 PDF file to organize.
@@ -140,24 +144,20 @@ export const OrganizerWorkspace: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h3>Organize Pages</h3>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button 
-            className="btn btn-secondary btn-sm" 
-            onClick={handleInsertBlank} 
-            disabled={isProcessing}
-          >
+          <button className="btn btn-secondary btn-sm" onClick={handleInsertBlank} disabled={isProcessing}>
             + Insert Blank Page
           </button>
-          <button 
-            className="btn btn-secondary btn-sm" 
-            onClick={handleRotateAll} 
-            disabled={isProcessing || urls.length === 0}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={handleRotateAll}
+            disabled={isProcessing || slots.length === 0}
           >
             Rotate All
           </button>
-          <button 
-            className="btn btn-primary btn-sm" 
-            onClick={handleSave} 
-            disabled={isProcessing || operations.length === 0}
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleSave}
+            disabled={isProcessing || isPristine || slots.length === 0}
           >
             {isProcessing ? 'Saving...' : 'Apply & Save'}
           </button>
@@ -171,17 +171,17 @@ export const OrganizerWorkspace: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '16px' }}>
-          {urls.map((url, i) => url ? (
-            <div 
-              key={i} 
+          {slots.map((slot, i) => (
+            <div
+              key={i}
               draggable={true}
               onDragStart={() => (dragItem.current = i)}
               onDragEnter={() => (dragOverItem.current = i)}
               onDragEnd={handleSort}
               onDragOver={(e) => e.preventDefault()}
-              style={{ 
-                background: 'var(--bg-card)', 
-                border: '1px solid var(--border-subtle)', 
+              style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-md)',
                 padding: '8px',
                 textAlign: 'center',
@@ -189,40 +189,90 @@ export const OrganizerWorkspace: React.FC = () => {
                 cursor: 'grab'
               }}
             >
-              <div style={{ 
-                position: 'absolute', 
-                top: 4, right: 4, 
-                background: 'rgba(0,0,0,0.5)', 
-                color: 'white', 
-                padding: '2px 6px', 
-                borderRadius: '4px',
-                fontSize: '11px'
-              }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  right: 4,
+                  background: 'rgba(0,0,0,0.5)',
+                  color: 'white',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  fontSize: '11px'
+                }}
+              >
                 {i + 1}
               </div>
-              <img src={url} alt={`Page ${i + 1}`} style={{ width: '100%', height: '180px', objectFit: 'contain' }} draggable={false} />
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '8px', flexWrap: 'wrap' }}>
-                <button 
+              <img
+                src={slot.kind === 'page' ? thumbs[slot.sourceIndex] : BLANK_THUMBNAIL}
+                alt={slot.kind === 'page' ? `Source page ${slot.sourceIndex + 1}` : 'Blank page'}
+                style={{
+                  width: '100%',
+                  height: '180px',
+                  objectFit: 'contain',
+                  // Preview the rotation, so the grid shows what will be saved.
+                  transform: `rotate(${slot.rotation}deg)`,
+                  transition: 'transform 150ms ease',
+                  background: slot.kind === 'blank' ? 'white' : undefined
+                }}
+                draggable={false}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  justifyContent: 'center',
+                  marginTop: '8px',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <button
                   onClick={() => handleRotate(i)}
-                  style={{ background: 'var(--accent-subtle)', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
+                  style={{
+                    background: 'var(--accent-subtle)',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
                 >
                   Rotate
                 </button>
-                <button 
+                <button
                   onClick={() => handleDuplicate(i)}
-                  style={{ background: 'var(--bg-hover)', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
+                  style={{
+                    background: 'var(--bg-hover)',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '11px'
+                  }}
                 >
                   Dup
                 </button>
-                <button 
+                <button
                   onClick={() => handleDelete(i)}
-                  style={{ background: '#fee2e2', color: '#b91c1c', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
+                  // A PDF cannot have zero pages; block the last delete here
+                  // rather than failing at save time.
+                  disabled={slots.length === 1}
+                  title={slots.length === 1 ? 'A PDF must keep at least one page' : undefined}
+                  style={{
+                    background: slots.length === 1 ? 'var(--bg-hover)' : '#fee2e2',
+                    color: slots.length === 1 ? 'var(--text-secondary)' : '#b91c1c',
+                    border: 'none',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    cursor: slots.length === 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '11px'
+                  }}
                 >
                   Delete
                 </button>
               </div>
             </div>
-          ) : null)}
+          ))}
         </div>
       )}
     </div>

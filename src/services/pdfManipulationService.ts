@@ -99,53 +99,73 @@ export const splitPdf = async (file: File, rangesStr: string): Promise<{ data: U
   return { data: await zip.generateAsync({ type: 'uint8array' }), type: 'zip' };
 };
 
-export type PageOperation = 
-  | { type: 'rotate'; pageIndex: number; degrees: number }
-  | { type: 'delete'; pageIndex: number }
-  | { type: 'duplicate'; pageIndex: number }
-  | { type: 'insertBlank'; pageIndex: number }
-  | { type: 'reorder'; newOrder: number[] }; // newOrder contains the sequence of old page indices
+/**
+ * One page of the document the user is assembling.
+ *
+ * `sourceIndex` always refers to a page of the ORIGINAL upload and never
+ * changes as the layout is edited. That is what makes this safe.
+ *
+ * This replaced a `PageOperation[]` mutation log whose indices were captured at
+ * click time and replayed here. Replaying against a document that shrinks as
+ * deletes are applied silently produced the wrong document: deleting the pages
+ * shown as 1 and 2 of a 5-page file removed originals 1 and 3, kept 2, emitted
+ * the right page COUNT, and reported success -- so there was no signal to the
+ * user that anything was wrong. A layout is a description of the finished
+ * document rather than a recipe to replay, so no index can go stale.
+ */
+export type PageSlot =
+  | { kind: 'page'; sourceIndex: number; rotation: number }
+  | { kind: 'blank'; rotation: number };
+
+/** pdf-lib only accepts quarter turns, and rejects negatives. */
+const normalizeQuarterTurn = (angle: number): number => {
+  const snapped = Math.round(angle / 90) * 90;
+  return ((snapped % 360) + 360) % 360;
+};
 
 /**
- * Manipulates pages (Rotate, Delete, Duplicate, Reorder).
+ * Rebuilds `file` as the exact sequence of pages described by `slots`.
  */
-export const manipulatePages = async (file: File, operations: PageOperation[]): Promise<Uint8Array> => {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await PDFDocument.load(arrayBuffer);
-  
-  // Reorder is a special operation that reconstructs the document
-  const reorderOp = operations.find(o => o.type === 'reorder') as { type: 'reorder', newOrder: number[] } | undefined;
-  
-  let workingPdf = pdf;
-
-  if (reorderOp) {
-    const newPdf = await PDFDocument.create();
-    const copiedPages = await newPdf.copyPages(pdf, reorderOp.newOrder);
-    copiedPages.forEach(p => newPdf.addPage(p));
-    workingPdf = newPdf;
+export const applyPageLayout = async (file: File, slots: PageSlot[]): Promise<Uint8Array> => {
+  if (slots.length === 0) {
+    throw new Error('A PDF needs at least one page. Restore a page before saving.');
   }
 
-  // Apply other operations (mutations)
-  // Note: if reorder was applied, pageIndices now map to the *new* document structure.
-  // The UI needs to send operations relative to the final desired state or we process in order.
-  // For simplicity, we apply them in sequence.
-
-  for (const op of operations) {
-    if (op.type === 'rotate') {
-      const page = workingPdf.getPage(op.pageIndex);
-      const currentRotation = page.getRotation().angle;
-      page.setRotation(degrees(currentRotation + op.degrees));
-    } else if (op.type === 'delete') {
-      workingPdf.removePage(op.pageIndex);
-    } else if (op.type === 'duplicate') {
-      const [copiedPage] = await workingPdf.copyPages(workingPdf, [op.pageIndex]);
-      workingPdf.insertPage(op.pageIndex + 1, copiedPage);
-    } else if (op.type === 'insertBlank') {
-      const width = workingPdf.getPage(0)?.getWidth() || 595.28; // A4 default
-      const height = workingPdf.getPage(0)?.getHeight() || 841.89; // A4 default
-      workingPdf.insertPage(op.pageIndex, [width, height]);
-    }
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const sourceCount = source.getPageCount();
+  if (sourceCount === 0) {
+    throw new Error('This PDF has no pages to organize.');
   }
 
-  return workingPdf.save();
+  const hasBadRef = slots.some(
+    (slot) =>
+      slot.kind === 'page' &&
+      (!Number.isInteger(slot.sourceIndex) || slot.sourceIndex < 0 || slot.sourceIndex >= sourceCount)
+  );
+  if (hasBadRef) {
+    throw new Error('This page layout refers to a page that is not in the document.');
+  }
+
+  const output = await PDFDocument.create();
+
+  // Every referenced page is copied in a single call, in slot order. Repeating
+  // an index yields independent copies, which is what makes duplicate work
+  // without mutating the source document.
+  const copied = await output.copyPages(
+    source,
+    slots.flatMap((slot) => (slot.kind === 'page' ? [slot.sourceIndex] : []))
+  );
+
+  // Blank pages take the first source page's dimensions so they don't appear
+  // as an odd size in the middle of the document.
+  const blankSize: [number, number] = [source.getPage(0).getWidth(), source.getPage(0).getHeight()];
+
+  let nextCopy = 0;
+  for (const slot of slots) {
+    const page = slot.kind === 'page' ? output.addPage(copied[nextCopy++]) : output.addPage(blankSize);
+    // Rotation is relative to whatever the source page already carried.
+    page.setRotation(degrees(normalizeQuarterTurn(page.getRotation().angle + slot.rotation)));
+  }
+
+  return output.save();
 };
