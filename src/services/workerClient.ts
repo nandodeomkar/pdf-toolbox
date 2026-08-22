@@ -1,6 +1,7 @@
 import PdfWorker from './pdfWorker?worker';
 import { WorkerMessage, WorkerResponse } from './pdfWorker';
 import { ConversionOptions } from './conversionService';
+import { PageSlot } from './pdfManipulationService';
 
 // NOTE: pdf.js's WorkerMessageHandler emits an unsolicited `{ action: 'ready' }`
 // handshake message as soon as the worker module evaluates. It has no `type`
@@ -146,8 +147,8 @@ export const splitPdfWorker = (file: File, ranges: string): Promise<{ data: Uint
   return sendManipulationCommand('SPLIT_PDF', { file, ranges, id: crypto.randomUUID() });
 };
 
-export const manipulatePagesWorker = (file: File, operations: any[]): Promise<{ data: Uint8Array; resultType: 'pdf' | 'zip' }> => {
-  return sendManipulationCommand('MANIPULATE_PAGES', { file, operations, id: crypto.randomUUID() });
+export const applyPageLayoutWorker = (file: File, slots: PageSlot[]): Promise<{ data: Uint8Array; resultType: 'pdf' | 'zip' }> => {
+  return sendManipulationCommand('APPLY_PAGE_LAYOUT', { file, slots, id: crypto.randomUUID() });
 };
 
 export const compressPdfWorker = (file: File, quality: 'high' | 'medium' | 'low'): Promise<{ data: Uint8Array; resultType: 'pdf' | 'zip' }> => {
